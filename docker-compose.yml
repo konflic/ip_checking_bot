@@ -1,0 +1,26 @@
+version: '3'
+services:
+
+  postgres:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: root
+
+  bot:
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      DEFAULT_ADMIN: ${DEFAULT_ADMIN}
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+
+  api:
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      DEFAULT_ADMIN: ${DEFAULT_ADMIN}
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8080:8080"

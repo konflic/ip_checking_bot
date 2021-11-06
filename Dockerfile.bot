@@ -1,0 +1,15 @@
+FROM golang:1.17-alpine AS build
+
+RUN apk add --no-cache git
+WORKDIR /tmp/bot 
+ENV GO111MODULE=auto
+COPY . .
+RUN go get -d -v ./...
+RUN ls -la
+RUN go build -o ./out/bot cmd/bot/main.go
+
+
+FROM alpine:3.10.3
+RUN apk add ca-certificates
+COPY --from=build /tmp/bot/out/bot /app/bot
+CMD ["/app/bot"]

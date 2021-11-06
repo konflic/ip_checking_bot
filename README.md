@@ -16,3 +16,5 @@ After setting variables from 0. and 1. run
 ```
 go run cmd/bot/main.go
 ```
+
+Database constant is located within helpers/dbhelpers.go file.

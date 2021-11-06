@@ -1,21 +1,18 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"os"
 
 	"github.com/konflic/ip_checking_bot/helpers"
+	log "github.com/sirupsen/logrus"
 
 	tgbotapi "github.com/Syfaro/telegram-bot-api"
-	_ "github.com/jackc/pgx/v4/stdlib"
+	_ "github.com/lib/pq"
 )
-
-const DATABASE_URL = "postgres://postgres:root@localhost:3306/postgres"
 
 var numericKeyboardUser = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
@@ -23,7 +20,7 @@ var numericKeyboardUser = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButton("Вспомнить всё"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("Очистить карму"),
+		tgbotapi.NewKeyboardButton("Очистить историю"),
 	),
 )
 
@@ -31,7 +28,7 @@ var numericKeyboardAdmin = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("Пробить IP"),
 		tgbotapi.NewKeyboardButton("Вспомнить всё"),
-		tgbotapi.NewKeyboardButton("Очистить карму"),
+		tgbotapi.NewKeyboardButton("Очистить историю"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("Добавить админа"),
@@ -66,19 +63,19 @@ func get_user_message(updates tgbotapi.UpdatesChannel) (msg string) {
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_TOKEN"))
-	db, _ := sql.Open("pgx", DATABASE_URL)
-
-	// Setting debug mod
-	bot.Debug = false
 
 	if err != nil {
 		log.Panic(err)
 		os.Exit(1)
 	}
 
-	if err := db.Ping(); err != nil {
-		log.Fatalf("%v", err)
-	}
+	db := helpers.InitDb()
+
+	// Setting up databases
+	helpers.SetupDatabase(db)
+
+	// Setting debug mod
+	bot.Debug = false
 
 	log.Printf("Authorized on account %s\n", bot.Self.UserName)
 
@@ -131,11 +128,8 @@ func main() {
 				bot.Send(tgbotapi.NewMessage(chat_id, "Это не ip адресс"))
 			}
 
-		case "Очистить карму":
-			_, err := db.Exec("DELETE FROM ipbotdb WHERE username = $1;", username)
-			if err != nil {
-				log.Fatalf("could not clear user requests: %v", err)
-			}
+		case "Очистить историю":
+			helpers.DeleteUserData(username, db)
 			msg := tgbotapi.NewMessage(chat_id, "Я тебя не видел...")
 			bot.Send(msg)
 
@@ -144,11 +138,11 @@ func main() {
 			bot.Send(msg)
 			if helpers.HasHistory(username, db) {
 				for ip_request, ip_result := range helpers.GetAllUserRequests(username, db) {
-					msg := tgbotapi.NewMessage(chat_id, ">>> "+ip_request+" : "+ip_result)
+					msg := tgbotapi.NewMessage(chat_id, "> "+ip_request+" : "+ip_result)
 					bot.Send(msg)
 				}
 			} else {
-				bot.Send(tgbotapi.NewMessage(chat_id, "ничего..."))
+				bot.Send(tgbotapi.NewMessage(chat_id, "в базе пусто..."))
 			}
 
 		case "Добавить админа":
@@ -173,7 +167,6 @@ func main() {
 				helpers.RemoveAdmin(remove_username, db)
 
 				bot.Send(tgbotapi.NewMessage(chat_id, fmt.Sprintf("Пользователь %s больше не админит.", remove_username)))
-
 			}
 
 		case "Проверить юзера":
@@ -185,34 +178,32 @@ func main() {
 				var check_username = get_user_message(updates)
 
 				if helpers.HasHistory(check_username, db) {
-					rows, _ := db.Query("SELECT ip_request FROM ipbotdb WHERE username = $1;", username)
-					for rows.Next() {
-						var ip_request string
-						rows.Scan(&ip_request)
-						msg := tgbotapi.NewMessage(chat_id, ">>> "+ip_request)
-						bot.Send(msg)
+					bot.Send(tgbotapi.NewMessage(chat_id, "Пользователь @"+username+" пробивал:"))
+					for ip_request, _ := range helpers.GetAllUserRequests(username, db) {
+						bot.Send(tgbotapi.NewMessage(chat_id, ip_request))
 					}
 				} else {
 					bot.Send(tgbotapi.NewMessage(chat_id, "на него ничего нет..."))
 				}
 			}
 
-		case "Разослать всем":
+		case "Рассылка":
 			if is_admin {
 				msg := tgbotapi.NewMessage(chat_id, "Какое сообщение разослать?")
 				msg.ReplyToMessageID = update.Message.MessageID
 				bot.Send(msg)
 
 				message_to_all := get_user_message(updates)
+				distinc_chats := helpers.GetDistinctChatIDs(db)
 
-				for chat_id := range helpers.GetDistinctChatIDs(db) {
+				for chat_id := range distinc_chats {
 					msg := tgbotapi.NewMessage(int64(chat_id), message_to_all)
 					bot.Send(msg)
 				}
 			}
 
 		default:
-			msg := tgbotapi.NewMessage(chat_id, "Непонятно...")
+			msg := tgbotapi.NewMessage(chat_id, "Непонятно.")
 			bot.Send(msg)
 		}
 	}
