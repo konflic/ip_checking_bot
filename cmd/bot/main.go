@@ -3,26 +3,19 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net"
+	"net/http"
 	"os"
-	"strconv"
 
-	ioutil "io/ioutil"
-	http "net/http"
+	"github.com/konflic/ip_checking_bot/helpers"
 
 	tgbotapi "github.com/Syfaro/telegram-bot-api"
 	_ "github.com/jackc/pgx/v4/stdlib"
 )
 
 const DATABASE_URL = "postgres://postgres:root@localhost:3306/postgres"
-
-type UserRequestEntry struct {
-	id         int32
-	username   string
-	ip_request string
-	ip_result  string
-	chat_id    string
-}
 
 var numericKeyboardUser = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
@@ -45,7 +38,7 @@ var numericKeyboardAdmin = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButton("Удалить админа"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("Разослать всем"),
+		tgbotapi.NewKeyboardButton("Рассылка"),
 		tgbotapi.NewKeyboardButton("Проверить юзера"),
 	),
 )
@@ -57,53 +50,13 @@ func get_ip_data_from_api(ip string) string {
 	return ip_data
 }
 
-func get_ip_data_from_db(ip_request string, db *sql.DB) string {
-	var ip_result string
-	err := db.QueryRow("SELECT ip_result FROM ipbotdb WHERE ip_request = $1;", ip_request).Scan(&ip_result)
-	if err != nil && err != sql.ErrNoRows {
-		log.Fatalf("error getting data from database %v", err)
-	}
-	return ip_result
-}
-
-func already_asked_ip(ip_request string, db *sql.DB) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT id FROM ipbotdb WHERE ip_request = $1);", ip_request).Scan(&exists)
-	if err != nil && err != sql.ErrNoRows {
-		log.Fatalf("error checking if row exists %v", err)
-	}
-	return exists
-}
-
-func has_history(username string, db *sql.DB) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT id FROM ipbotdb WHERE username = $1);", username).Scan(&exists)
-	if err != nil && err != sql.ErrNoRows {
-		log.Fatalf("error checking if row exists %v", err)
-	}
-	return exists
-}
-
-func is_admin(username string, db *sql.DB) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT * FROM botadmins WHERE username = $1);", username).Scan(&exists)
-	if err != nil && err != sql.ErrNoRows {
-		log.Fatalf("error checking if row exists %v", err)
-	}
-	return exists
-}
-
-func get_user_message(updates tgbotapi.UpdatesChannel) string {
-
-	var msg string
+func get_user_message(updates tgbotapi.UpdatesChannel) (msg string) {
 
 	for update := range updates {
-
 		if update.Message == nil {
 			// ignore any non-Message Updates
 			continue
 		}
-
 		msg = update.Message.Text
 		break
 	}
@@ -112,7 +65,7 @@ func get_user_message(updates tgbotapi.UpdatesChannel) string {
 }
 
 func main() {
-	bot, err := tgbotapi.NewBotAPI("464078875:AAHhpWqincGZN9J3Wug5dPD5mdkzC6jQFF4")
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_TOKEN"))
 	db, _ := sql.Open("pgx", DATABASE_URL)
 
 	// Setting debug mod
@@ -142,12 +95,12 @@ func main() {
 
 		chat_id := update.Message.Chat.ID
 		username := update.Message.From.UserName
-		is_admin := is_admin(username, db)
+		is_admin := helpers.IsAdmin(username, db)
 
 		switch update.Message.Text {
 
 		case "/start":
-			msg := tgbotapi.NewMessage(chat_id, "Привет")
+			msg := tgbotapi.NewMessage(chat_id, "Привет, я бот для вычисления по IP.")
 			msg.ReplyToMessageID = update.Message.MessageID
 			if is_admin {
 				msg.ReplyMarkup = numericKeyboardAdmin
@@ -164,37 +117,34 @@ func main() {
 			var ip_result string
 			var ip_request = get_user_message(updates)
 
-			if !already_asked_ip(ip_request, db) {
-				ip_result = get_ip_data_from_api(ip_request)
-				_, err := db.Exec(
-					"INSERT INTO ipbotdb (username, ip_request, ip_result, chat_id) VALUES ($1, $2, $3, $4)",
-					username, ip_request, ip_result, fmt.Sprint(chat_id))
-				if err != nil {
-					log.Fatalf("could not insert row: %v", err)
+			if net.ParseIP(ip_request) != nil {
+				if !helpers.AlreadyAskedIp(ip_request, db) {
+					ip_result = get_ip_data_from_api(ip_request)
+					helpers.AddRequestEntry(username, ip_request, ip_result, chat_id, db)
+				} else {
+					// Если такой ip уже пробивали то подтягиваем из базы
+					// TODO: Запоминать время последнего пробива, чтобы обновлять кэш
+					ip_result = helpers.GetIpDataFromDb(ip_request, db)
 				}
+				bot.Send(tgbotapi.NewMessage(chat_id, ip_result))
 			} else {
-				ip_result = get_ip_data_from_db(ip_request, db)
+				bot.Send(tgbotapi.NewMessage(chat_id, "Это не ip адресс"))
 			}
-
-			bot.Send(tgbotapi.NewMessage(chat_id, ip_result))
 
 		case "Очистить карму":
-			msg := tgbotapi.NewMessage(chat_id, "Я тебя не видел...")
-			bot.Send(msg)
 			_, err := db.Exec("DELETE FROM ipbotdb WHERE username = $1;", username)
 			if err != nil {
-				log.Fatalf("could not delete row: %v", err)
+				log.Fatalf("could not clear user requests: %v", err)
 			}
+			msg := tgbotapi.NewMessage(chat_id, "Я тебя не видел...")
+			bot.Send(msg)
 
 		case "Вспомнить всё":
 			msg := tgbotapi.NewMessage(chat_id, "Подтягиваю базу")
 			bot.Send(msg)
-			if has_history(username, db) {
-				rows, _ := db.Query("SELECT ip_request,  FROM ipbotdb WHERE username = $1;", username)
-				for rows.Next() {
-					userEntry := UserRequestEntry{}
-					rows.Scan(&userEntry.id, &userEntry.username, &userEntry.ip_request, &userEntry.ip_result)
-					msg := tgbotapi.NewMessage(chat_id, ">>> "+userEntry.ip_request+" : "+userEntry.ip_result)
+			if helpers.HasHistory(username, db) {
+				for ip_request, ip_result := range helpers.GetAllUserRequests(username, db) {
+					msg := tgbotapi.NewMessage(chat_id, ">>> "+ip_request+" : "+ip_result)
 					bot.Send(msg)
 				}
 			} else {
@@ -208,11 +158,8 @@ func main() {
 				bot.Send(msg)
 
 				var add_username = get_user_message(updates)
+				helpers.AddAdmin(add_username, db)
 
-				_, err := db.Exec("INSERT INTO botadmins (username) VALUES ($1)", add_username)
-				if err != nil {
-					log.Fatalf("could not insert row: %v", err)
-				}
 				bot.Send(tgbotapi.NewMessage(chat_id, fmt.Sprintf("Пользователь %s назначен админом!", add_username)))
 			}
 
@@ -223,17 +170,13 @@ func main() {
 				bot.Send(msg)
 
 				var remove_username = get_user_message(updates)
-
-				_, err := db.Exec("DELETE FROM botadmins WHERE username = $1;", remove_username)
-				if err != nil {
-					log.Fatalf("could not insert row: %v", err)
-				}
+				helpers.RemoveAdmin(remove_username, db)
 
 				bot.Send(tgbotapi.NewMessage(chat_id, fmt.Sprintf("Пользователь %s больше не админит.", remove_username)))
 
 			}
 
-		case "Проверить пользователя":
+		case "Проверить юзера":
 			if is_admin {
 				msg := tgbotapi.NewMessage(chat_id, "Какого пользователя проверить? (username)")
 				msg.ReplyToMessageID = update.Message.MessageID
@@ -241,7 +184,7 @@ func main() {
 
 				var check_username = get_user_message(updates)
 
-				if has_history(check_username, db) {
+				if helpers.HasHistory(check_username, db) {
 					rows, _ := db.Query("SELECT ip_request FROM ipbotdb WHERE username = $1;", username)
 					for rows.Next() {
 						var ip_request string
@@ -256,14 +199,14 @@ func main() {
 
 		case "Разослать всем":
 			if is_admin {
-				rows, _ := db.Query("SELECT DISTINCT chat_id FROM ipbotdb;")
+				msg := tgbotapi.NewMessage(chat_id, "Какое сообщение разослать?")
+				msg.ReplyToMessageID = update.Message.MessageID
+				bot.Send(msg)
 
-				for rows.Next() {
-					var chat_id string
-					rows.Scan(&chat_id)
-					fmt.Println(chat_id)
-					int_chat_id, _ := strconv.ParseInt(chat_id, 0, 64)
-					msg := tgbotapi.NewMessage(int_chat_id, "Hello!")
+				message_to_all := get_user_message(updates)
+
+				for chat_id := range helpers.GetDistinctChatIDs(db) {
+					msg := tgbotapi.NewMessage(int64(chat_id), message_to_all)
 					bot.Send(msg)
 				}
 			}
