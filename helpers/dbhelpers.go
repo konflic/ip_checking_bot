@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 )
 
@@ -34,12 +35,12 @@ func AlreadyAskedIp(ip_request string, db *sql.DB) bool {
 }
 
 func IsAdmin(username string, db *sql.DB) bool {
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT * FROM botadmins WHERE username = $1);", username).Scan(&exists)
+	var admin_exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT * FROM botadmins WHERE username = $1);", username).Scan(&admin_exists)
 	if err != nil && err != sql.ErrNoRows {
 		log.Fatalf("error checking if row exists %v", err)
 	}
-	return exists
+	return admin_exists
 }
 
 func GetIpDataFromDb(ip_request string, db *sql.DB) string {
@@ -102,4 +103,27 @@ func AddRequestEntry(username string, ip_request string, ip_result string, chat_
 	if err != nil {
 		log.Fatalf("could not insert row: %v", err)
 	}
+}
+
+func SetupDatabase(db *sql.DB) {
+
+	var ipbotdb_exists bool
+	var botadmins_exists bool
+
+	db.QueryRow("SELECT EXISTS (SELECT * FROM ipbotdb);").Scan(&ipbotdb_exists)
+	db.QueryRow("SELECT EXISTS (SELECT * FROM botadmins);").Scan(&botadmins_exists)
+
+	if !ipbotdb_exists {
+		db.Exec("CREATE TABLE ipbotdb (id SERIAL PRIMARY KEY, username VARCHAR(256), ip_request VARCHAR(256), ip_result TEXT, chat_id VARCHAR(256));")
+	}
+
+	if !botadmins_exists {
+		db.Exec("CREATE TABLE botadmins (id SERIAL PRIMARY KEY, username VARCHAR(256));")
+	}
+
+	if !IsAdmin(os.Getenv("DEFAULT_ADMIN"), db) {
+		db.Exec("INSERT INTO botadmins (username) VALUES ($1);", os.Getenv("DEFAULT_ADMIN"))
+	}
+
+	fmt.Println("Databases crated and default admin added!")
 }
