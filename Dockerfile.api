@@ -4,8 +4,8 @@ RUN apk add --no-cache git
 WORKDIR /tmp/api 
 ENV GO111MODULE=auto
 COPY . .
+RUN go get -d -v ./...
 RUN ls -la
-# RUN go get -d -v ./...
 RUN go build -o ./out/api cmd/api/main.go
 
 
