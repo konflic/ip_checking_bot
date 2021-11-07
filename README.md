@@ -18,3 +18,11 @@ go run cmd/bot/main.go
 ```
 
 Database constant is located within helpers/dbhelpers.go file.
+
+# Setup with docker-compose
+
+In order to setup API, BOT with Database all at once use the following command:
+
+```
+TELEGTAM_TOKEN={your token} DEFAULT_ADMIN={your_admin} docker-compose up -d
+```
