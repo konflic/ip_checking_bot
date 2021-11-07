@@ -141,14 +141,28 @@ func DeleteUserData(username string, db *sql.DB) {
 	_, err := db.Exec("DELETE FROM ipbotdb WHERE username = $1;", username)
 	if err != nil {
 		log.Fatal("could not clear user requests: %v", err)
+	} else {
+		log.Printf("All data for user @%s was removed.", username)
 	}
-	log.Printf("All data for user @%s was removed.", username)
+}
+
+func DeleteUserIPRequest(username string, ip_request string, db *sql.DB) {
+	_, err := db.Exec("DELETE FROM ipbotdb WHERE username = $1 AND ip_request = $2;", username, ip_request)
+	if err != nil {
+		log.Fatal("could not delete ip request: %v", err)
+	} else {
+		log.Printf("IP request %s for user @%s was removed.")
+	}
 }
 
 func SetupDatabase(db *sql.DB) {
 
 	var ipbotdb_exists bool
 	var botadmins_exists bool
+
+	if os.Getenv("TELEGRAM_TOKEN") == "" {
+		log.Print("You did not set default admin for bot! Set env variable DEFAULT_ADMIN to add admin.")
+	}
 
 	db.QueryRow("SELECT EXISTS (SELECT * FROM ipbotdb);").Scan(&ipbotdb_exists)
 	db.QueryRow("SELECT EXISTS (SELECT * FROM botadmins);").Scan(&botadmins_exists)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,12 +9,10 @@ import (
 )
 
 func main() {
-	db := helpers.InitDb()
-	fmt.Print(db)
-
 	router := gin.Default()
 	router.GET("/get_users", get_users)
 	router.GET("/get_user/:username", get_user_by_id)
+	router.DELETE("/remove/:username/:request")
 	router.Run("localhost:8080")
 }
 
@@ -28,4 +25,11 @@ func get_user_by_id(c *gin.Context) {
 	username := c.Param("username")
 	requests := helpers.GetAllUserRequests(username, helpers.InitDb())
 	c.IndentedJSON(http.StatusOK, requests)
+}
+
+func delete_user_request(c *gin.Context) {
+	username := c.Param("username")
+	request := c.Param("request")
+	helpers.DeleteUserIPRequest(username, request, helpers.InitDb())
+	c.IndentedJSON(http.StatusOK, "Removed")
 }

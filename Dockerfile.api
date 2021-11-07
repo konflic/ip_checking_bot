@@ -7,7 +7,7 @@ COPY . .
 RUN go get -d -v ./...
 RUN ls -la
 RUN go build -o ./out/api cmd/api/main.go
-
+EXPOSE 8080
 
 FROM alpine:3.10.3
 RUN apk add ca-certificates

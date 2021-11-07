@@ -62,6 +62,12 @@ func get_user_message(updates tgbotapi.UpdatesChannel) (msg string) {
 }
 
 func main() {
+
+	if os.Getenv("TELEGRAM_TOKEN") == "" {
+		log.Print("You must TELEGRAM_TOKEN environment varaible.")
+		os.Exit(1)
+	}
+
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_TOKEN"))
 
 	if err != nil {
@@ -69,15 +75,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	db := helpers.InitDb()
-
-	// Setting up databases
-	helpers.SetupDatabase(db)
-
 	// Setting debug mod
 	bot.Debug = false
 
 	log.Printf("Authorized on account %s\n", bot.Self.UserName)
+
+	// Setting up databases
+	db := helpers.InitDb()
+	helpers.SetupDatabase(db)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
