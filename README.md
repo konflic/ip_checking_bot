@@ -1,6 +1,6 @@
 # ip_checking_bot
 
-Golang bot for ip validation.
+Golang bot for ip check via external IP allows to obtain basic information about given IP adress. It also includes admin functionallity.
 
 0. For working properly app require environment variable with API telegram token to be set as TELEGRAM_TOKEN.
 
